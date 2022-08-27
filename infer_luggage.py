@@ -28,15 +28,14 @@ if str(ROOT) not in sys.path:
 ROOT = Path(os.path.relpath(ROOT, Path.cwd()))  # relative
 
 # common definition
-image_file_path = '/home/noname/projects/deeplearning/datasets/luggage/images/train/000000000000.jpg'
+image_file_path = '/home/noname/projects/deeplearning/datasets/luggage/images/train/000000000025.jpg'
 bs = 1  # batch_size
-conf_thres = 0.25  # confidence threshold
-iou_thres = 0.45  # NMS IOU threshold
+conf_thres = 0.10  # confidence threshold
+iou_thres = 0.25  # NMS IOU threshold
 classes = None  # filter by class: --class 0, or --class 0 2 3
 agnostic_nms = False  # class-agnostic NMS
 max_det = 1000  # maximum detections per image
 device = select_device('')
-
 
 def plot_one_box(x, image, color=None, label=None, line_thickness=None):
   # Plots one bounding box on image img
@@ -94,18 +93,18 @@ def render_result(image_file_path, pred):
         # elif class_idx == 1:
         #     draw_car_tangle = cv2.rectangle(image,(x1,y1),(x2,y2),(0,255,0),2)     # 画框操作  绿框  宽度为1
         #     cv2.imwrite(save_file_path,draw_car_tangle)  #画框 并保存
-        if c == 28:
+        # the color mode is BGR
+        if c == 0:
           # this is a luggage
           color = [0, 255, 0]
-        else:
-          # this is a damage
-          color = [255, 0, 0]
+        else:          # this is a damage
+          color = [0, 0, 255]
 
         plot_one_box([x1, y1, x2, y2], image, color=color, label=None, line_thickness=2)
 
 
         # cv2.imwrite(save_file_path, image)
-  cv2.imshow('cv2 show image', image)
+  cv2.imshow('composed result image', image)
   cv2.waitKey(0)
   pass
 
@@ -115,7 +114,9 @@ def _onnx_infer():
   image_height = 640
 
   # onnx_file_path = '/home/noname/projects/deeplearning/yolov5-luggage-defect-detection/runs/train/exp11/weights/best.onnx'
-  onnx_file_path = '/home/noname/projects/deeplearning/yolov5-luggage-defect-detection/model_binaries/yolov5x.onnx'
+  #onnx_file_path = '/home/noname/projects/deeplearning/yolov5-luggage-defect-detection/model_binaries/yolov5x.onnx'
+  onnx_file_path = '/home/noname/projects/deeplearning/yolov5-luggage-defect-detection/runs/train/exp13/weights/best.onnx'
+  #onnx_file_path = '/home/noname/projects/deeplearning/yolov5-luggage-defect-detection/runs/train/exp13/weights/last.onnx'
   if not os.path.exists(onnx_file_path):
     print(f'[trace] target onnx file does NOT exist: {onnx_file_path}')
     exit(-1)

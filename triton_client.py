@@ -74,7 +74,7 @@ def render_result(image_file_path, pred):
         # elif class_idx == 1:
         #     draw_car_tangle = cv2.rectangle(image,(x1,y1),(x2,y2),(0,255,0),2)     # 画框操作  绿框  宽度为1
         #     cv2.imwrite(save_file_path,draw_car_tangle)  #画框 并保存
-        if c == 28:
+        if c == 0:
           # this is a luggage
           color = [0, 255, 0]
         else:

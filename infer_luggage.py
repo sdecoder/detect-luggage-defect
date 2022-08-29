@@ -39,6 +39,7 @@ agnostic_nms = False  # class-agnostic NMS
 max_det = 1000  # maximum detections per image
 device = select_device('')
 
+
 def _pt_model_infer():
   '''
   im = torch.from_numpy(im).to(device)
@@ -121,7 +122,6 @@ def _pt_model_infer():
 
   print(f"[trace] done with ONNX inference testing")
   pass
-
 
 
 class InferenceEngine:
@@ -330,18 +330,20 @@ class FlaskInferenceEngine(InferenceEngine):
     pass
 
 
+engine_mapping = {
+  "onnx": OnnxInferenceEngine(),
+  "triton": TritonInferenceEngine(),
+  "tensorrt": TensorRTInferenceEngine(),
+  "flask": FlaskInferenceEngine(),
+}
+
+
 class InferenceEngineFactory:
+
   def produce_engine(engine_name):
-    if engine_name == 'onnx':
-      return OnnxInferenceEngine()
-    elif engine_name == 'triton':
-      return TritonInferenceEngine()
-    elif engine_name == 'tensorrt':
-      return TensorRTInferenceEngine()
-    elif engine_name == 'flask':
-      return FlaskInferenceEngine()
-    else:
+    if engine_name not in engine_mapping:
       raise ValueError(engine_name)
+    return engine_mapping[engine_name]
 
 
 def run(

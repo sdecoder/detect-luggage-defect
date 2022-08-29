@@ -4,6 +4,7 @@ import platform
 import sys
 from pathlib import Path
 
+import PIL
 import cv2
 
 import torch
@@ -20,6 +21,7 @@ from utils.dataloaders import LoadImages
 from utils.general import print_args, non_max_suppression, scale_coords, check_img_size
 from utils.plots import Annotator
 from utils.torch_utils import select_device
+from utils.common_func import load_engine, allocate_buffers_for_encoder, _load_img_to_tensor, render_result
 
 FILE = Path(__file__).resolve()
 ROOT = FILE.parents[0]  # YOLOv5 root directory
@@ -36,119 +38,6 @@ classes = None  # filter by class: --class 0, or --class 0 2 3
 agnostic_nms = False  # class-agnostic NMS
 max_det = 1000  # maximum detections per image
 device = select_device('')
-
-def plot_one_box(x, image, color=None, label=None, line_thickness=None):
-  # Plots one bounding box on image img
-  tl = line_thickness or round(0.002 * (image.shape[0] + image.shape[1]) / 2) + 1  # line/font thickness
-  color = color or [random.randint(0, 255) for _ in range(3)]
-  c1, c2 = (int(x[0]), int(x[1])), (int(x[2]), int(x[3]))
-  cv2.rectangle(image, c1, c2, color, thickness=tl, lineType=cv2.LINE_AA)
-  if label:
-    tf = max(tl - 1, 1)  # font thickness
-    t_size = cv2.getTextSize(label, 0, fontScale=tl / 3, thickness=tf)[0]
-    c2 = c1[0] + t_size[0], c1[1] - t_size[1] - 3
-    cv2.rectangle(image, c1, c2, color, -1, cv2.LINE_AA)  # filled
-    cv2.putText(image, label, (c1[0], c1[1] - 2), 0, tl / 3, [225, 255, 255], thickness=tf, lineType=cv2.LINE_AA)
-
-
-def render_result(image_file_path, pred, title='Result Image'):
-
-  image = cv2.imread(image_file_path)
-  try:
-    height, width, channels = image.shape
-  except:
-    print('no shape info.')
-    return 0
-
-  imgsz = (640, 640)  # inference size (height, width)
-  for i, det in enumerate(pred):  # per image
-
-    if len(det):
-      print(f'[trace] object detected!')
-      det[:, :4] = scale_coords(imgsz, det[:, :4], image.shape).round()
-
-      for *xyxy, conf, cls in reversed(det):
-        c = int(cls)  # integer class
-        print(f"f[trace] coordinates: {xyxy}")
-        print(f'[trace] found class code: {c}')
-
-        from utils.general import xyxy2xywh
-        gn = torch.tensor(image.shape)[[1, 0, 1, 0]]  # normalization gain whwh
-        xywh = (xyxy2xywh(torch.tensor(xyxy).view(1, 4)) / gn).view(-1).tolist()  # normalized xywh
-
-        x_center_ratio = float(xywh[0])
-        y_center_ratio = float(xywh[1])
-        width_ratio = float(xywh[2])
-        height_ratio = float(xywh[3])
-
-        x_center, y_center, w, h = x_center_ratio * width, y_center_ratio * height, width_ratio * width, height_ratio * height
-        x1 = round(x_center - w / 2)
-        y1 = round(y_center - h / 2)
-        x2 = round(x_center + w / 2)
-        y2 = round(y_center + h / 2)
-
-        # if class_idx == 0:
-        #     draw_people_tangle = cv2.rectangle(image, (x1,y1),(x2,y2),(0,0,255),2)   # 画框操作  红框  宽度为1
-        #     cv2.imwrite(save_file_path,draw_people_tangle)  #画框 并保存
-        # elif class_idx == 1:
-        #     draw_car_tangle = cv2.rectangle(image,(x1,y1),(x2,y2),(0,255,0),2)     # 画框操作  绿框  宽度为1
-        #     cv2.imwrite(save_file_path,draw_car_tangle)  #画框 并保存
-        # the color mode is BGR
-        if c == 0:
-          # this is a luggage
-          color = [0, 255, 0]
-        else:          # this is a damage
-          color = [0, 0, 255]
-
-        plot_one_box([x1, y1, x2, y2], image, color=color, label=None, line_thickness=2)
-
-
-        # cv2.imwrite(save_file_path, image)
-  cv2.imshow(title, image)
-  cv2.waitKey(0)
-  pass
-
-
-def _onnx_infer():
-  image_width = 640
-  image_height = 640
-
-  # onnx_file_path = '/home/noname/projects/deeplearning/yolov5-luggage-defect-detection/runs/train/exp11/weights/best.onnx'
-  #onnx_file_path = '/home/noname/projects/deeplearning/yolov5-luggage-defect-detection/model_binaries/yolov5x.onnx'
-  onnx_file_path = '/home/noname/projects/deeplearning/yolov5-luggage-defect-detection/runs/train/exp13/weights/best.onnx'
-  #onnx_file_path = '/home/noname/projects/deeplearning/yolov5-luggage-defect-detection/runs/train/exp13/weights/last.onnx'
-  if not os.path.exists(onnx_file_path):
-    print(f'[trace] target onnx file does NOT exist: {onnx_file_path}')
-    exit(-1)
-
-  dim = (image_width, image_height)  # resize image
-  from PIL import Image
-  im = Image.open(image_file_path)
-  im = im.resize(dim)
-  trans = transforms.ToTensor()
-  im = trans(im)
-  im = torch.unsqueeze(im, 0)
-
-  def to_numpy(tensor):
-    return tensor.detach().cpu().numpy() if tensor.requires_grad else tensor.cpu().numpy()
-
-  ort_session = onnxruntime.InferenceSession(onnx_file_path)
-  # compute ONNX Runtime output prediction
-  ort_inputs = {ort_session.get_inputs()[0].name: to_numpy(im)}
-  ort_outs = ort_session.run(None, ort_inputs)
-
-  # compare ONNX Runtime and PyTorch results
-  pred = ort_outs[0]
-  pred = torch.from_numpy(pred).to(device)
-  pred = non_max_suppression(pred, conf_thres, iou_thres, classes, agnostic_nms, max_det=max_det)
-  # img = cv2.imread(image_file_path, cv2.IMREAD_COLOR) / 255
-  # show_img = cv2.imread(image_file_path, cv2.IMREAD_ANYCOLOR)
-  # cv2.imshow('output image', show_img) # this is for output
-  # cv2.waitKey(0)
-
-  render_result(image_file_path, pred)
-  pass
-
 
 def _pt_model_infer():
   '''
@@ -234,227 +123,226 @@ def _pt_model_infer():
   pass
 
 
-def _cvt_onnx_to_trt():
-  pass
+
+class InferenceEngine:
+  def __int__(self):
+    pass
+
+  def infer(self):
+    return None
 
 
-class HostDeviceMem(object):
-  def __init__(self, host_mem, device_mem):
-    self.host = host_mem
-    self.device = device_mem
+class OnnxInferenceEngine(InferenceEngine):
+  def infer(self):
+    print(f'[trace] infer using onnx engine')
+    self._onnx_infer()
+    pass
 
-  def __str__(self):
-    return "Host:\n" + str(self.host) + "\nDevice:\n" + str(self.device)
+  def _onnx_infer(self):
+    image_width = 640
+    image_height = 640
+    # onnx_file_path = '/home/noname/projects/deeplearning/yolov5-luggage-defect-detection/runs/train/exp11/weights/best.onnx'
+    # onnx_file_path = '/home/noname/projects/deeplearning/yolov5-luggage-defect-detection/model_binaries/yolov5x.onnx'
+    onnx_file_path = '/home/noname/projects/deeplearning/yolov5-luggage-defect-detection/runs/train/exp13/weights/best.onnx'
+    # onnx_file_path = '/home/noname/projects/deeplearning/yolov5-luggage-defect-detection/runs/train/exp13/weights/last.onnx'
+    if not os.path.exists(onnx_file_path):
+      print(f'[trace] target onnx file does NOT exist: {onnx_file_path}')
+      exit(-1)
 
-  def __repr__(self):
-    return self.__str__()
+    dim = (image_width, image_height)  # resize image
+    from PIL import Image
+    im = Image.open(image_file_path)
+    im = im.resize(dim)
+    trans = transforms.ToTensor()
+    im = trans(im)
+    im = torch.unsqueeze(im, 0)
+
+    def to_numpy(tensor):
+      return tensor.detach().cpu().numpy() if tensor.requires_grad else tensor.cpu().numpy()
+
+    ort_session = onnxruntime.InferenceSession(onnx_file_path)
+    # compute ONNX Runtime output prediction
+    ort_inputs = {ort_session.get_inputs()[0].name: to_numpy(im)}
+    ort_outs = ort_session.run(None, ort_inputs)
+
+    # compare ONNX Runtime and PyTorch results
+    pred = ort_outs[0]
+    pred = torch.from_numpy(pred).to(device)
+    pred = non_max_suppression(pred, conf_thres, iou_thres, classes, agnostic_nms, max_det=max_det)
+    # img = cv2.imread(image_file_path, cv2.IMREAD_COLOR) / 255
+    # show_img = cv2.imread(image_file_path, cv2.IMREAD_ANYCOLOR)
+    # cv2.imshow('output image', show_img) # this is for output
+    # cv2.waitKey(0)
+
+    render_result(image_file_path, pred)
+    pass
 
 
-def allocate_buffers_for_encoder(engine):
-  import tensorrt as trt
-  from PIL import Image
-  import pycuda.driver as cuda
-  import pycuda.autoinit
-  import numpy as np
-  import time
-  import os
-  import cv2
-  import torch
-  import argparse
-  """Allocates host and device buffer for TRT engine inference.
-  This function is similair to the one in common.py, but
-  converts network outputs (which are np.float32) appropriately
-  before writing them to Python buffer. This is needed, since
-  TensorRT plugins doesn't support output type description, and
-  in our particular case, we use NMS plugin as network output.
-  Args:
-      engine (trt.ICudaEngine): TensorRT engine
-  Returns:
-      inputs [HostDeviceMem]: engine input memory
-      outputs [HostDeviceMem]: engine output memory
-      bindings [int]: buffer to device bindings
-      stream (cuda.Stream): cuda stream for engine inference synchronization
-  """
-  print('[trace] reach func@allocate_buffers')
-  inputs = []
-  outputs = []
-  bindings = []
-  stream = cuda.Stream()
+class TensorRTInferenceEngine(InferenceEngine):
+  def infer(self):
+    print(f'[trace] infer using tensorrt engine')
+    self._infer_with_tensorrt()
+    pass
 
-  binding_to_type = {}
-  binding_to_type['images'] = np.float32
-  binding_to_type['output'] = np.float32
+  def _infer_with_tensorrt(self):
+    import tensorrt as trt
+    import pycuda.driver as cuda
+    import pycuda.autoinit
+    import numpy as np
+    import time
+    import os
+    import cv2
+    import torch
+    import argparse
 
-  # Current NMS implementation in TRT only supports DataType.FLOAT but
-  # it may change in the future, which could brake this sample here
-  # when using lower precision [e.g. NMS output would not be np.float32
-  # anymore, even though this is assumed in binding_to_type]
+    FILE = Path(__file__).resolve()
+    ROOT = FILE.parents[0]  # YOLOv5 root directory
+    # '/home/noname/projects/deeplearning/yolov5-luggage-defect-detection/'
+    _trt_engine_path = f'{ROOT}/runs/train/exp13/weights/best.engine'
+    if not os.path.exists(_trt_engine_path):
+      print(f'[trace] target TensorRT engine file does NOT exist: {_trt_engine_path}')
+      exit(-1)
 
-  for binding in engine:
-    print(f'[trace] current binding: {str(binding)}')
-    _binding_shape = engine.get_binding_shape(binding)
-    _volume = trt.volume(_binding_shape)
-    size = _volume * engine.max_batch_size
-    print(f'[trace] current binding size: {size}')
-    dtype = binding_to_type[str(binding)]
-    # Allocate host and device buffers
-    host_mem = cuda.pagelocked_empty(size, dtype)
-    device_mem = cuda.mem_alloc(host_mem.nbytes)
-    # Append the device buffer to device bindings.
-    bindings.append(int(device_mem))
-    # Append to the appropriate list.
-    if engine.binding_is_input(binding):
-      inputs.append(HostDeviceMem(host_mem, device_mem))
+    TRT_LOGGER = trt.Logger(trt.Logger.WARNING)
+    trt.init_libnvinfer_plugins(TRT_LOGGER, '')
+    trt_runtime = trt.Runtime(TRT_LOGGER)
+    batch_size = 1
+    trt_engine = load_engine(trt_runtime, _trt_engine_path)
+    print("[trace] TensorRT engine loaded")
+    print("[trace] allocating buffers for TensorRT engine")
+    inputs, outputs, bindings, stream = allocate_buffers_for_encoder(trt_engine)
+    print("[trace] allocating buffers done")
+
+    print("[trace] TensorRT engine: creating execution context")
+    context = trt_engine.create_execution_context()
+
+    img = PIL.Image.open(image_file_path)
+    img = _load_img_to_tensor(img)
+    np.copyto(inputs[0].host, img.ravel())
+    [cuda.memcpy_htod_async(inp.device, inp.host, stream) for inp in inputs]
+    # Run inference.
+    context.execute_async(batch_size=batch_size, bindings=bindings, stream_handle=stream.handle)
+    stream.synchronize()
+    [cuda.memcpy_dtoh_async(out.host, out.device, stream) for out in outputs]
+    stream.synchronize()
+    print(f'[trace] done with trt inference')
+    ret = outputs[0]
+    # pred = non_max_suppression(pred, conf_thres, iou_thres, classes, agnostic_nms, max_det=max_det)
+
+    output = torch.from_numpy(ret.host)
+    output = torch.reshape(output, (1, 25200, 7))
+    pred = non_max_suppression(output, conf_thres, iou_thres, classes, agnostic_nms, max_det=max_det)
+    render_result(image_file_path, pred)
+
+    pass
+
+
+class TritonInferenceEngine(InferenceEngine):
+
+  def infer(self):
+    print(f'[trace] infer using triton engine')
+    self._infer_with_triton()
+    pass
+
+  def _infer_with_triton(self):
+    import tritonclient.http as tritonhttpclient
+    import torch
+    from utils.general import scale_coords, non_max_suppression
+    from utils.torch_utils import select_device
+
+    print(f'[trace] defining the parameters')
+    VERBOSE = False
+    input_name = 'images'
+    input_shape = (1, 3, 640, 640)
+    input_dtype = 'FP32'
+    output_name = 'output'
+    model_name = 'yolov5-luggage-defect'
+    url = 'localhost:8000'
+    model_version = '1'
+
+    print(f'[trace] creating objects')
+    triton_client = tritonhttpclient.InferenceServerClient(url=url, verbose=VERBOSE)
+    model_metadata = triton_client.get_model_metadata(model_name=model_name, model_version=model_version)
+    model_config = triton_client.get_model_config(model_name=model_name, model_version=model_version)
+
+    import numpy as np
+    from PIL import Image
+    from torchvision import transforms
+
+    print(f'[trace] preparing input data')
+    image = PIL.Image.open(image_file_path)
+    image_tensor = _load_img_to_tensor(image)
+    image_numpy = image_tensor.cpu().numpy()
+    image_numpy = image_numpy[None]
+    print(image_numpy.shape)
+
+    print(f'[trace] start to interact with Triton server...')
+    input0 = tritonhttpclient.InferInput(input_name, input_shape, input_dtype)
+    input0.set_data_from_numpy(image_numpy, binary_data=False)
+
+    output = tritonhttpclient.InferRequestedOutput(output_name, binary_data=False)
+    response = triton_client.infer(model_name, model_version=model_version,
+                                   inputs=[input0], outputs=[output])
+
+    bs = 1  # batch_size
+    conf_thres = 0.10  # confidence threshold
+    iou_thres = 0.25  # NMS IOU threshold
+    classes = None  # filter by class: --class 0, or --class 0 2 3
+    agnostic_nms = False  # class-agnostic NMS
+    max_det = 1000  # maximum detections per image
+
+    device = select_device('')
+    pred = response.as_numpy(output_name)
+    pred = torch.from_numpy(pred).to(device)
+    pred = non_max_suppression(pred, conf_thres, iou_thres, classes, agnostic_nms, max_det=max_det)
+    # img = cv2.imread(image_file_path, cv2.IMREAD_COLOR) / 255
+    # show_img = cv2.imread(image_file_path, cv2.IMREAD_ANYCOLOR)
+    # cv2.imshow('output image', show_img) # this is for output
+    # cv2.waitKey(0)
+
+    render_result(image_file_path, pred)
+    pass
+
+
+class FlaskInferenceEngine(InferenceEngine):
+
+  def infer(self):
+    print(f'[trace] infer using flask engine')
+    self._infer_with_flask()
+    pass
+
+  def _infer_with_flask(self):
+    # curl -X POST  http://127.0.0.1:8080/infer_by_trt
+    import pickle
+    import requests
+
+    image_file_path = '/home/noname/projects/deeplearning/datasets/luggage/images/train/000000000016.jpg'
+    file_handle = open(image_file_path, 'rb')
+    files = {'file': file_handle}
+    values = {'DB': 'photcat', 'OUT': 'csv', 'SHORT': 'short'}
+    url = 'http://localhost:8080/uploader'
+    # curl -X POST  http://127.0.0.1:8080/infer_by_trt
+
+    post_result = requests.post(url, files=files, data=values)
+    bytes = post_result.content
+    pred = pickle.loads(bytes)
+    render_result(image_file_path, pred, title='Flask inference result')
+    pass
+
+
+class InferenceEngineFactory:
+  def produce_engine(engine_name):
+    if engine_name == 'onnx':
+      return OnnxInferenceEngine()
+    elif engine_name == 'triton':
+      return TritonInferenceEngine()
+    elif engine_name == 'tensorrt':
+      return TensorRTInferenceEngine()
+    elif engine_name == 'flask':
+      return FlaskInferenceEngine()
     else:
-      outputs.append(HostDeviceMem(host_mem, device_mem))
-  return inputs, outputs, bindings, stream
+      raise ValueError(engine_name)
 
-
-def load_engine(trt_runtime, engine_path):
-  with open(engine_path, 'rb') as f:
-    engine_data = f.read()
-  engine = trt_runtime.deserialize_cuda_engine(engine_data)
-  return engine
-
-
-def _load_img(image_path):
-  from PIL import Image
-  import torchvision.transforms
-
-  im = Image.open(image_path)
-  im = im.resize((640, 640))
-  # im.show()
-  trans_to_tensor = torchvision.transforms.ToTensor()
-  _tensor = trans_to_tensor(im)
-  return _tensor
-
-
-def _trt_infer():
-  import tensorrt as trt
-  import pycuda.driver as cuda
-  import pycuda.autoinit
-  import numpy as np
-  import time
-  import os
-  import cv2
-  import torch
-  import argparse
-
-  _trt_engine_path = '/home/noname/projects/deeplearning/yolov5-luggage-defect-detection/runs/train/exp13/weights/best.engine'
-  if not os.path.exists(_trt_engine_path):
-    print(f'[trace] target TensorRT engine file does NOT exist: {_trt_engine_path}')
-    exit(-1)
-
-  TRT_LOGGER = trt.Logger(trt.Logger.WARNING)
-  trt.init_libnvinfer_plugins(TRT_LOGGER, '')
-  trt_runtime = trt.Runtime(TRT_LOGGER)
-  batch_size = 1
-  trt_engine = load_engine(trt_runtime, _trt_engine_path)
-  print("[trace] TensorRT engine loaded")
-  print("[trace] allocating buffers for TensorRT engine")
-  inputs, outputs, bindings, stream = allocate_buffers_for_encoder(trt_engine)
-  print("[trace] allocating buffers done")
-
-  print("[trace] TensorRT engine: creating execution context")
-  context = trt_engine.create_execution_context()
-
-  img = _load_img(image_file_path)
-  np.copyto(inputs[0].host, img.ravel())
-  [cuda.memcpy_htod_async(inp.device, inp.host, stream) for inp in inputs]
-  # Run inference.
-  context.execute_async(batch_size=batch_size, bindings=bindings, stream_handle=stream.handle)
-  stream.synchronize()
-  [cuda.memcpy_dtoh_async(out.host, out.device, stream) for out in outputs]
-  stream.synchronize()
-  print(f'[trace] done with trt inference')
-  ret = outputs[0]
-  # pred = non_max_suppression(pred, conf_thres, iou_thres, classes, agnostic_nms, max_det=max_det)
-
-  output = torch.from_numpy(ret.host)
-  output = torch.reshape(output, (1, 25200, 7))
-  pred = non_max_suppression(output, conf_thres, iou_thres, classes, agnostic_nms, max_det=max_det)
-  render_result(image_file_path, pred)
-
-  pass
-
-def _infer_with_flask():
-
-
-  # curl -X POST  http://127.0.0.1:8080/infer_by_trt
-  import pickle
-  import requests
-
-  image_file_path = '/home/noname/projects/deeplearning/datasets/luggage/images/train/000000000016.jpg'
-  file_handle = open(image_file_path, 'rb')
-  files = {'file': file_handle}
-  values = {'DB': 'photcat', 'OUT': 'csv', 'SHORT': 'short'}
-  url = 'http://localhost:8080/uploader'
-  # curl -X POST  http://127.0.0.1:8080/infer_by_trt
-
-  post_result = requests.post(url, files=files, data=values)
-  bytes = post_result.content
-  pred = pickle.loads(bytes)
-  render_result(image_file_path, pred, title='Flask inference result')
-  pass
-
-def _triton_infer():
-
-  import tritonclient.http as tritonhttpclient
-  import torch
-  from utils.general import scale_coords, non_max_suppression
-  from utils.torch_utils import select_device
-
-  print(f'[trace] defining the parameters')
-  VERBOSE = False
-  input_name = 'images'
-  input_shape = (1, 3, 640, 640)
-  input_dtype = 'FP32'
-  output_name = 'output'
-  model_name = 'yolov5-luggage-defect'
-  url = 'localhost:8000'
-  model_version = '1'
-
-  print(f'[trace] creating objects')
-  triton_client = tritonhttpclient.InferenceServerClient(url=url, verbose=VERBOSE)
-  model_metadata = triton_client.get_model_metadata(model_name=model_name, model_version=model_version)
-  model_config = triton_client.get_model_config(model_name=model_name, model_version=model_version)
-
-  import numpy as np
-  from PIL import Image
-  from torchvision import transforms
-
-  print(f'[trace] preparing input data')
-  image_tensor = _load_img(image_file_path)
-  image_numpy = image_tensor.cpu().numpy()
-  image_numpy = image_numpy[None]
-  print(image_numpy.shape)
-
-  print(f'[trace] start to interact with Triton server...')
-  input0 = tritonhttpclient.InferInput(input_name, input_shape, input_dtype)
-  input0.set_data_from_numpy(image_numpy, binary_data=False)
-
-  output = tritonhttpclient.InferRequestedOutput(output_name, binary_data=False)
-  response = triton_client.infer(model_name, model_version=model_version,
-                                 inputs=[input0], outputs=[output])
-
-  bs = 1  # batch_size
-  conf_thres = 0.10  # confidence threshold
-  iou_thres = 0.25  # NMS IOU threshold
-  classes = None  # filter by class: --class 0, or --class 0 2 3
-  agnostic_nms = False  # class-agnostic NMS
-  max_det = 1000  # maximum detections per image
-
-  device = select_device('')
-  pred = response.as_numpy(output_name)
-  pred = torch.from_numpy(pred).to(device)
-  pred = non_max_suppression(pred, conf_thres, iou_thres, classes, agnostic_nms, max_det=max_det)
-  # img = cv2.imread(image_file_path, cv2.IMREAD_COLOR) / 255
-  # show_img = cv2.imread(image_file_path, cv2.IMREAD_ANYCOLOR)
-  # cv2.imshow('output image', show_img) # this is for output
-  # cv2.waitKey(0)
-
-  render_result(image_file_path, pred)
-  pass
 
 def run(
     weights=ROOT / 'yolov5s.pt',  # model.pt path(s)
@@ -483,12 +371,20 @@ def run(
     hide_conf=False,  # hide confidences
     half=False,  # use FP16 half-precision inference
     dnn=False,  # use OpenCV DNN for ONNX inference
+    infra=None,
 ):
-  #_onnx_infer()
-  #_trt_infer()
-  #_triton_infer()
-  _infer_with_flask()
+  if not infra:
+    return None
+
+  print(f'[trace] current infra={infra}')
+  inferenceEngine = InferenceEngineFactory.produce_engine(infra)
+  inferenceEngine.infer()
+  # _onnx_infer()
+  # _infer_with_tensorrt()
+  # _triton_infer()
+  # _infer_with_flask()
   pass
+
 
 def parse_opt():
   parser = argparse.ArgumentParser()
@@ -500,24 +396,14 @@ def parse_opt():
   parser.add_argument('--iou-thres', type=float, default=0.45, help='NMS IoU threshold')
   parser.add_argument('--max-det', type=int, default=1000, help='maximum detections per image')
   parser.add_argument('--device', default='', help='cuda device, i.e. 0 or 0,1,2,3 or cpu')
-  parser.add_argument('--view-img', action='store_true', help='show results')
-  parser.add_argument('--save-txt', action='store_true', help='save results to *.txt')
-  parser.add_argument('--save-conf', action='store_true', help='save confidences in --save-txt labels')
-  parser.add_argument('--save-crop', action='store_true', help='save cropped prediction boxes')
-  parser.add_argument('--nosave', action='store_true', help='do not save images/videos')
-  parser.add_argument('--classes', nargs='+', type=int, help='filter by class: --classes 0, or --classes 0 2 3')
   parser.add_argument('--agnostic-nms', action='store_true', help='class-agnostic NMS')
-  parser.add_argument('--augment', action='store_true', help='augmented inference')
-  parser.add_argument('--visualize', action='store_true', help='visualize features')
-  parser.add_argument('--update', action='store_true', help='update all models')
-  parser.add_argument('--project', default=ROOT / 'runs/detect', help='save results to project/name')
   parser.add_argument('--name', default='exp', help='save results to project/name')
   parser.add_argument('--exist-ok', action='store_true', help='existing project/name ok, do not increment')
   parser.add_argument('--line-thickness', default=3, type=int, help='bounding box thickness (pixels)')
   parser.add_argument('--hide-labels', default=False, action='store_true', help='hide labels')
   parser.add_argument('--hide-conf', default=False, action='store_true', help='hide confidences')
   parser.add_argument('--half', action='store_true', help='use FP16 half-precision inference')
-  parser.add_argument('--dnn', action='store_true', help='use OpenCV DNN for ONNX inference')
+  parser.add_argument('--infra', type=str, help='use onnx/triton/tensorrt/flask')
   opt = parser.parse_args()
   opt.imgsz *= 2 if len(opt.imgsz) == 1 else 1  # expand
   print_args(vars(opt))

@@ -33,6 +33,19 @@ Visualize:       https://netron.app
 2. image_file_path = '/home/noname/projects/deeplearning/datasets/luggage/images/train/000000000016.jpg'
 3. image_file_path = '/home/noname/projects/deeplearning/datasets/luggage/images/train/000000000024.jpg'
 
+* Performance data:
+trtexec --loadEngine=best.engine --batch=128 --streams=32 --verbose --avgRuns=20
+```shell
+[08/29/2022-17:09:04] [I] Throughput: 4719.69 qps
+[08/29/2022-17:09:04] [I] Latency: min = 114.873 ms, max = 1295.56 ms, mean = 847.8 ms, median = 934.057 ms, percentile(99%) = 1189.62 ms
+[08/29/2022-17:09:04] [I] Enqueue Time: min = 0.366281 ms, max = 452.828 ms, mean = 99.6711 ms, median = 38.6289 ms, percentile(99%) = 438.662 ms
+[08/29/2022-17:09:04] [I] H2D Latency: min = 1.66406 ms, max = 19.3125 ms, mean = 4.17684 ms, median = 1.74438 ms, percentile(99%) = 19.1172 ms
+[08/29/2022-17:09:04] [I] GPU Compute Time: min = 112.816 ms, max = 1287.63 ms, mean = 843.108 ms, median = 928.094 ms, percentile(99%) = 1181.64 ms
+[08/29/2022-17:09:04] [I] D2H Latency: min = 0.226562 ms, max = 1.34229 ms, mean = 0.515291 ms, median = 0.245117 ms, percentile(99%) = 1.06641 ms
+[08/29/2022-17:09:04] [I] Total Host Walltime: 68.669 s
+
+```
+
 
 * Tasks done so far
 
@@ -45,4 +58,3 @@ Visualize:       https://netron.app
 
 1. using SOTA models like: swin transform
 2. train with more data
-

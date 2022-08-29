@@ -28,7 +28,7 @@ if str(ROOT) not in sys.path:
 ROOT = Path(os.path.relpath(ROOT, Path.cwd()))  # relative
 
 # common definition
-image_file_path = '/home/noname/projects/deeplearning/datasets/luggage/images/train/000000000025.jpg'
+image_file_path = '/home/noname/projects/deeplearning/datasets/luggage/images/train/000000000016.jpg'
 bs = 1  # batch_size
 conf_thres = 0.10  # confidence threshold
 iou_thres = 0.25  # NMS IOU threshold
@@ -340,7 +340,7 @@ def _trt_infer():
   import torch
   import argparse
 
-  _trt_engine_path = '/home/noname/projects/deeplearning/yolov5-luggage-defect-detection/model_binaries/yolov5x.engine'
+  _trt_engine_path = '/home/noname/projects/deeplearning/yolov5-luggage-defect-detection/runs/train/exp13/weights/best.engine'
   if not os.path.exists(_trt_engine_path):
     print(f'[trace] target TensorRT engine file does NOT exist: {_trt_engine_path}')
     exit(-1)
@@ -371,12 +371,75 @@ def _trt_infer():
   # pred = non_max_suppression(pred, conf_thres, iou_thres, classes, agnostic_nms, max_det=max_det)
 
   output = torch.from_numpy(ret.host)
-  output = torch.reshape(output, (1, 25200, 85))
+  output = torch.reshape(output, (1, 25200, 7))
   pred = non_max_suppression(output, conf_thres, iou_thres, classes, agnostic_nms, max_det=max_det)
   render_result(image_file_path, pred)
 
   pass
 
+def _flask_infer():
+
+  # curl -X POST  http://127.0.0.1:8080/infer_by_trt
+  pass
+
+def _triton_infer():
+
+  import tritonclient.http as tritonhttpclient
+  import torch
+  from utils.general import scale_coords, non_max_suppression
+  from utils.torch_utils import select_device
+
+  print(f'[trace] defining the parameters')
+  VERBOSE = False
+  input_name = 'images'
+  input_shape = (1, 3, 640, 640)
+  input_dtype = 'FP32'
+  output_name = 'output'
+  model_name = 'yolov5-luggage-defect'
+  url = 'localhost:8000'
+  model_version = '1'
+
+  print(f'[trace] creating objects')
+  triton_client = tritonhttpclient.InferenceServerClient(url=url, verbose=VERBOSE)
+  model_metadata = triton_client.get_model_metadata(model_name=model_name, model_version=model_version)
+  model_config = triton_client.get_model_config(model_name=model_name, model_version=model_version)
+
+  import numpy as np
+  from PIL import Image
+  from torchvision import transforms
+
+  print(f'[trace] preparing input data')
+  image_tensor = _load_img(image_file_path)
+  image_numpy = image_tensor.cpu().numpy()
+  image_numpy = image_numpy[None]
+  print(image_numpy.shape)
+
+  print(f'[trace] start to interact with Triton server...')
+  input0 = tritonhttpclient.InferInput(input_name, input_shape, input_dtype)
+  input0.set_data_from_numpy(image_numpy, binary_data=False)
+
+  output = tritonhttpclient.InferRequestedOutput(output_name, binary_data=False)
+  response = triton_client.infer(model_name, model_version=model_version,
+                                 inputs=[input0], outputs=[output])
+
+  bs = 1  # batch_size
+  conf_thres = 0.10  # confidence threshold
+  iou_thres = 0.25  # NMS IOU threshold
+  classes = None  # filter by class: --class 0, or --class 0 2 3
+  agnostic_nms = False  # class-agnostic NMS
+  max_det = 1000  # maximum detections per image
+
+  device = select_device('')
+  pred = response.as_numpy(output_name)
+  pred = torch.from_numpy(pred).to(device)
+  pred = non_max_suppression(pred, conf_thres, iou_thres, classes, agnostic_nms, max_det=max_det)
+  # img = cv2.imread(image_file_path, cv2.IMREAD_COLOR) / 255
+  # show_img = cv2.imread(image_file_path, cv2.IMREAD_ANYCOLOR)
+  # cv2.imshow('output image', show_img) # this is for output
+  # cv2.waitKey(0)
+
+  render_result(image_file_path, pred)
+  pass
 
 def run(
     weights=ROOT / 'yolov5s.pt',  # model.pt path(s)
@@ -406,11 +469,10 @@ def run(
     half=False,  # use FP16 half-precision inference
     dnn=False,  # use OpenCV DNN for ONNX inference
 ):
-  _onnx_infer()
+  #_onnx_infer()
   #_trt_infer()
-
+  _triton_infer()
   pass
-
 
 def parse_opt():
   parser = argparse.ArgumentParser()

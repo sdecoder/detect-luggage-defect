@@ -51,7 +51,7 @@ def plot_one_box(x, image, color=None, label=None, line_thickness=None):
     cv2.putText(image, label, (c1[0], c1[1] - 2), 0, tl / 3, [225, 255, 255], thickness=tf, lineType=cv2.LINE_AA)
 
 
-def render_result(image_file_path, pred):
+def render_result(image_file_path, pred, title='Result Image'):
 
   image = cv2.imread(image_file_path)
   try:
@@ -104,7 +104,7 @@ def render_result(image_file_path, pred):
 
 
         # cv2.imwrite(save_file_path, image)
-  cv2.imshow('composed result image', image)
+  cv2.imshow(title, image)
   cv2.waitKey(0)
   pass
 
@@ -377,9 +377,24 @@ def _trt_infer():
 
   pass
 
-def _flask_infer():
+def _infer_with_flask():
+
 
   # curl -X POST  http://127.0.0.1:8080/infer_by_trt
+  import pickle
+  import requests
+
+  image_file_path = '/home/noname/projects/deeplearning/datasets/luggage/images/train/000000000016.jpg'
+  file_handle = open(image_file_path, 'rb')
+  files = {'file': file_handle}
+  values = {'DB': 'photcat', 'OUT': 'csv', 'SHORT': 'short'}
+  url = 'http://localhost:8080/uploader'
+  # curl -X POST  http://127.0.0.1:8080/infer_by_trt
+
+  post_result = requests.post(url, files=files, data=values)
+  bytes = post_result.content
+  pred = pickle.loads(bytes)
+  render_result(image_file_path, pred, title='Flask inference result')
   pass
 
 def _triton_infer():
@@ -471,7 +486,8 @@ def run(
 ):
   #_onnx_infer()
   #_trt_infer()
-  _triton_infer()
+  #_triton_infer()
+  _infer_with_flask()
   pass
 
 def parse_opt():
